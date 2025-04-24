@@ -1,0 +1,144 @@
+name: Build tailscale for Android
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+  
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get latest stable release from tailscale
+      id: get_stable_release
+      uses: octokit/request-action@v2.x
+      with:
+        route: GET /repos/tailscale/tailscale/releases/latest
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
+    - name: Get latest tag
+      run: |
+        latestTag="${{ fromJSON(steps.get_stable_release.outputs.data).tag_name }}"
+        echo "Latest tag: $latestTag"
+        echo "LATEST_TAILSCALE_VERSION_TAG=${latestTag}" >> $GITHUB_ENV
+      shell: bash
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check Latest Version
+      run: |
+        LATEST_VERSION=$(git describe --tags --abbrev=0)
+        if [ "$LATEST_VERSION" == "${{ env.LATEST_TAILSCALE_VERSION_TAG }}" ]; then
+          echo "No new version found. Exiting."
+          exit 0
+        else
+          echo "New version found: ${LATEST_VERSION}"
+        fi
+
+    - name: Checkout tailscale
+      uses: actions/checkout@v4
+      with:
+        repository: tailscale/tailscale
+        path: tailscale-build
+        ref: ${{ env.LATEST_TAILSCALE_VERSION_TAG }}  
+
+    - name: Setup Go 1.24.x
+      uses: actions/setup-go@v5
+      with:
+        go-version: 'stable'
+        cache: false
+    
+    - name: Build Tailscale for Android
+      run: |
+
+        cd tailscale-build
+
+        eval `CGO_ENABLED=0 GOOS=$(go env GOHOSTOS) GOARCH=$(go env GOHOSTARCH) go run ./cmd/mkversion`
+        ldflags="-X tailscale.com/version.longStamp=${VERSION_LONG} -X tailscale.com/version.shortStamp=${VERSION_SHORT}"
+
+        echo "BUILD_TAILSCALE_VERSION=${VERSION_SHORT}" >> $GITHUB_ENV
+
+        NDK_BIN_PATH="$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+        echo "Building for arm64"
+        CC=${NDK_BIN_PATH}/aarch64-linux-android21-clang CXX=${NDK_BIN_PATH}/aarch64-linux-android21-clang++ CGO_ENABLED=1 GOOS=android GOARCH=arm64 go build -tags ts_include_cli -ldflags "$ldflags -s -w" -o ./tailscale.combined -trimpath ./cmd/tailscaled
+
+    - name: Install UPX
+      uses: crazy-max/ghaction-upx@v3
+      with:
+        install-only: true
+
+    - name: Compress binaries
+      run: |
+        upx --version
+
+        echo "Compressing tailscale binaries for arm64"
+        du -hs ./tailscale-build/tailscale.combined
+        upx --lzma --best ./tailscale-build/tailscale.combined
+        du -hs ./tailscale-build/tailscale.combined
+
+        echo "Copying compressed binaries to files directory"
+        mkdir -p files
+        cp ./tailscale-build/tailscale.combined files/tailscale
+        cp ./tailscale-build/tailscale.combined files/tailscaled
+        rm -rf tailscale-build
+
+    - name: Update repository
+      run: |
+        # Store the version info to environment variables
+        versionString="${{ env.LATEST_TAILSCALE_VERSION_TAG }}"
+
+        IFS='.' read -ra VERSION_PARTS <<< "${versionString//[^0-9.]/}" # Get numeric version parts
+        newVersionCode=$(printf "%02d%02d%02d%02d" "${VERSION_PARTS[0]}" "${VERSION_PARTS[1]}" "${VERSION_PARTS[2]}" "${VERSION_PARTS[3]}") # Get version code number
+
+        # Update module.prop
+        sed -i "s/^version=.*/version=${versionString}/" module.prop
+        sed -i "s/^versionCode=.*/versionCode=$newVersionCode/" module.prop
+
+        # Estimate the zip url location
+        zipUrl="https://github.com/mgksu/tailscaled/releases/download/$versionString/Magisk-Tailscaled-$versionString.zip"
+
+        # Update update.json
+        jq '.version = $newVersion | .versionCode = $newVersionCode | .zipUrl = $newZipUrl \
+          --arg newVersion "${versionString}" \
+          --arg newVersionCode "$newVersionCode" \
+          --arg newZipUrl "$zipUrl" \
+          update.json > temp.json && mv temp.json update.json
+        git add .
+
+    - name: Commit and push
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Updated to ${{ env.LATEST_TAILSCALE_VERSION_TAG }}"
+          git push
+          git tag ${{ env.LATEST_TAILSCALE_VERSION_TAG }}
+          git push origin ${{ env.LATEST_TAILSCALE_VERSION_TAG }} -f
+        fi
+  
+    - name: Create Zip file for release
+      run: |
+        versionString="${{ env.LATEST_TAILSCALE_VERSION_TAG }}"
+        mkdir -p dist
+        zip -9 -r "./dist/Magisk-Tailscaled-${versionString}.zip" . -x "*git*" "dist/*" "*.zip" "*.json" "*.md"
+
+    - name: Create Release
+      id: create_release
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        append_body: true
+        generate_release_notes: true
+        make_latest: true
+        files: |
+          ./dist/Magisk-Tailscaled-${{ env.LATEST_TAILSCALE_VERSION_TAG }}.zip
+        name: Magisk Tailscaled ${{ env.LATEST_TAILSCALE_VERSION_TAG }}
+        tag_name: ${{ env.LATEST_TAILSCALE_VERSION_TAG }}
+
