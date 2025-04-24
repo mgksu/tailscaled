@@ -1,3 +1,2 @@
 #!/system/bin/sh
-export PATH=/data/adb/tailscale/scripts:$PATH
-tailscaled.service "$@"
+/data/adb/tailscale/scripts/tailscaled.service" "$@"

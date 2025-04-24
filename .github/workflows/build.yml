@@ -1,11 +1,19 @@
 name: Build tailscale for Android
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force build'
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '0 0 * * 0'
   
 permissions:
   contents: write
+  actions: write
+  
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,28 +30,32 @@ jobs:
       run: |
         latestTag="${{ fromJSON(steps.get_stable_release.outputs.data).tag_name }}"
         echo "Latest tag: $latestTag"
-        echo "LATEST_TAILSCALE_VERSION_TAG=${latestTag}" >> $GITHUB_ENV
-      shell: bash
+        echo "TAILSCALE_VERSION=${latestTag}" >> $GITHUB_ENV
 
     - name: Checkout code
       uses: actions/checkout@v4
 
+    - name: Fetch tags
+      run: git fetch --prune --unshallow --tags
+
     - name: Check Latest Version
+      if: ${{ inputs.force == false }}
       run: |
-        LATEST_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-        if [ "$LATEST_VERSION" == "${{ env.LATEST_TAILSCALE_VERSION_TAG }}" ]; then
-          echo "No new version found. Exiting."
-          exit 0
+        LATEST_VERSION=$(git describe --tags --abbrev=0 --always)
+        if [ "$LATEST_VERSION" == "${{ env.TAILSCALE_VERSION }}" ]; then
+          gh run cancel ${{ github.run_id }}
         else
           echo "New version found: ${LATEST_VERSION}"
         fi
+      env:
+       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Checkout tailscale
       uses: actions/checkout@v4
       with:
         repository: tailscale/tailscale
         path: tailscale-build
-        ref: ${{ env.LATEST_TAILSCALE_VERSION_TAG }}  
+        ref: ${{ env.TAILSCALE_VERSION }}  
 
     - name: Setup Go 1.24.x
       uses: actions/setup-go@v5
@@ -55,6 +67,8 @@ jobs:
       run: |
 
         cd tailscale-build
+
+        patch -p1 < ../android.ssh.patch
 
         eval `CGO_ENABLED=0 GOOS=$(go env GOHOSTOS) GOARCH=$(go env GOHOSTARCH) go run ./cmd/mkversion`
         ldflags="-X tailscale.com/version.longStamp=${VERSION_LONG} -X tailscale.com/version.shortStamp=${VERSION_SHORT}"
@@ -79,54 +93,55 @@ jobs:
         du -hs ./tailscale-build/tailscale.combined
         upx --lzma --best ./tailscale-build/tailscale.combined
         du -hs ./tailscale-build/tailscale.combined
-
-        echo "Copying compressed binaries to files directory"
         mkdir -p files
-        cp ./tailscale-build/tailscale.combined files/tailscale
-        cp ./tailscale-build/tailscale.combined files/tailscaled
+        cp ./tailscale-build/tailscale.combined files/tailscale.combined
         rm -rf tailscale-build
-
-    - name: Update repository
+    
+    - name: Build Magisk Module
       run: |
-        # Store the version info to environment variables
-        versionString="${{ env.LATEST_TAILSCALE_VERSION_TAG }}"
+          version="${{ env.TAILSCALE_VERSION }}"
+          version_code=$(echo "${version}" | sed 's/[^0-9]//g')
+          echo "version=${version}" >> $GITHUB_ENV
+          echo "versionCode=${version_code}" >> $GITHUB_ENV
+          echo version=${version}
+          echo versionCode=${version_code}
+          
+          echo "id=tailscaled" > module.prop
+          echo "name=Tailscaled" >> module.prop
+          echo "version=${version}" >> module.prop
+          echo "versionCode=${version_code}" >> module.prop
+          echo "author=repotitan" >> module.prop
+          echo "description=Tailscale. The easiest, most secure way to use WireGuard and 2FA." >> module.prop
+          echo "updateJson=https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/main/update.json" >> module.prop
+    
 
-        IFS='.' read -ra VERSION_PARTS <<< "${versionString//[^0-9.]/}" # Get numeric version parts
-        newVersionCode=$(printf "%02d%02d%02d%02d" "${VERSION_PARTS[0]}" "${VERSION_PARTS[1]}" "${VERSION_PARTS[2]}" "${VERSION_PARTS[3]}") # Get version code number
-
-        # Update module.prop
-        sed -i "s/^version=.*/version=${versionString}/" module.prop
-        sed -i "s/^versionCode=.*/versionCode=$newVersionCode/" module.prop
-
-        # Estimate the zip url location
-        zipUrl="https://github.com/mgksu/tailscaled/releases/download/$versionString/Magisk-Tailscaled-$versionString.zip"
-
-        # Update update.json
-        jq '.version = $newVersion | .versionCode = $newVersionCode | .zipUrl = $newZipUrl \
-          --arg newVersion "${versionString}" \
-          --arg newVersionCode "$newVersionCode" \
-          --arg newZipUrl "$zipUrl" \
-          update.json > temp.json && mv temp.json update.json
-        git add .
-
-    - name: Commit and push
+    - name: Create Module Zip
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "Updated to ${{ env.LATEST_TAILSCALE_VERSION_TAG }}"
-          git push
-          git tag ${{ env.LATEST_TAILSCALE_VERSION_TAG }}
-          git push origin ${{ env.LATEST_TAILSCALE_VERSION_TAG }} -f
-        fi
-  
-    - name: Create Zip file for release
-      run: |
-        versionString="${{ env.LATEST_TAILSCALE_VERSION_TAG }}"
         mkdir -p dist
-        zip -9 -r "./dist/Magisk-Tailscaled-${versionString}.zip" . -x "*git*" "dist/*" "*.zip" "*.json" "*.md"
+        zip -9 -r ./dist/Magisk-Tailscaled-${{ env.version }}.zip . -x "*git*" "dist/*" "*.zip" "*.json" "*.md"
+
+    - name: Set up Git
+      run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+    - name: Push updated files to Main branch
+      run: |
+          echo '{
+            "version": "${{ env.version }}",
+            "versionCode": "${{ env.versionCode }}",
+            "zipUrl": "https://github.com/${{ github.repository }}/releases/download/${{ env.version }}/Magisk-Tailscaled-${{ env.version }}.zip",
+            "changelog": "https://raw.githubusercontent.com/${{ github.repository }}/main/CHANGELOG.md"
+          }' > update.json
+          git add .
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Release ${{ env.version }}"
+            git push origin HEAD:main --force
+            git tag ${{ env.version }}
+            git push origin ${{ env.version }} -f
+          fi
 
     - name: Create Release
       id: create_release
@@ -138,7 +153,7 @@ jobs:
         generate_release_notes: true
         make_latest: true
         files: |
-          ./dist/Magisk-Tailscaled-${{ env.LATEST_TAILSCALE_VERSION_TAG }}.zip
-        name: Magisk Tailscaled ${{ env.LATEST_TAILSCALE_VERSION_TAG }}
-        tag_name: ${{ env.LATEST_TAILSCALE_VERSION_TAG }}
+          ./dist/Magisk-Tailscaled-${{ env.version }}.zip
+        name: ${{ env.version }}
+        tag_name: ${{ env.version }}
 

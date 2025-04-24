@@ -42,6 +42,7 @@ start_tailscaled() {
     log Info "✔ tailscaled service running with PID : ( $PID )."
     return
   fi
+  setup_home
   # The logs time cannot set to current timezone, default is UTC.
   nohup ${tailscaled_bin} ${tailscaled_bin_param} > "${tailscaled_log}" 2>&1 &
   PID=$!

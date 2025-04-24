@@ -1,0 +1,136 @@
+diff --git a/envknob/featureknob/featureknob.go b/envknob/featureknob/featureknob.go
+index e9b871f74..c1f48aa47 100644
+--- a/envknob/featureknob/featureknob.go
++++ b/envknob/featureknob/featureknob.go
+@@ -19,6 +19,7 @@
+ // supported for the current os/distro.
+ func CanRunTailscaleSSH() error {
+ 	switch runtime.GOOS {
++	case "android":
+ 	case "linux":
+ 		if distro.Get() == distro.Synology && !envknob.UseWIPCode() {
+ 			return errors.New("The Tailscale SSH server does not run on Synology.")
+diff --git a/paths/paths.go b/paths/paths.go
+index 28c3be02a..469db0f60 100644
+--- a/paths/paths.go
++++ b/paths/paths.go
+@@ -21,6 +21,9 @@
+ // DefaultTailscaledSocket returns the path to the tailscaled Unix socket
+ // or the empty string if there's no reasonable default.
+ func DefaultTailscaledSocket() string {
++	if runtime.GOOS == "android" {
++		return "/data/adb/tailscale/run/tailscaled.sock"
++	}
+ 	if runtime.GOOS == "windows" {
+ 		return `\\.\pipe\ProtectedPrefix\Administrators\Tailscale\tailscaled`
+ 	}
+diff --git a/ssh/tailssh/incubator.go b/ssh/tailssh/incubator.go
+index 4f630186d..cd0782727 100644
+--- a/ssh/tailssh/incubator.go
++++ b/ssh/tailssh/incubator.go
+@@ -48,6 +48,7 @@
+ 	darwin  = "darwin"
+ 	freebsd = "freebsd"
+ 	openbsd = "openbsd"
++	android = "android"
+ )
+ 
+ func init() {
+@@ -779,6 +780,12 @@ func (ss *sshSession) launchProcess() error {
+ 	cmd := ss.cmd
+ 	cmd.Dir = "/"
+ 	cmd.Env = envForUser(ss.conn.localUser)
++	if runtime.GOOS == "android" {
++		cmd.Dir = "/data/ssh/root"
++		for _, kv := range os.Environ() {
++			cmd.Env = append(cmd.Env, kv)
++		}
++	}
+ 	for _, kv := range ss.Environ() {
+ 		if acceptEnvPair(kv) {
+ 			cmd.Env = append(cmd.Env, kv)
+@@ -1100,6 +1107,8 @@ func (ia *incubatorArgs) loginArgs(loginCmdPath string) []string {
+ 			return []string{loginCmdPath, "-f", ia.localUser, "-p"}
+ 		}
+ 		return []string{loginCmdPath, "-f", ia.localUser, "-h", ia.remoteIP, "-p"}
++	case android:
++		return []string{loginCmdPath}
+ 	case freebsd, openbsd:
+ 		return []string{loginCmdPath, "-fp", "-h", ia.remoteIP, ia.localUser}
+ 	}
+@@ -1119,6 +1128,15 @@ func shellArgs(isShell bool, cmd string) []string {
+ }
+ 
+ func setGroups(groupIDs []int) error {
++	if runtime.GOOS == "android" {
++		if os.Geteuid() == 0 {
++			err := syscall.Setgroups(groupIDs)
++			if err != nil {
++				fmt.Println("Setgroups failed:", err)
++			}
++		}
++		return nil
++	}
+ 	if runtime.GOOS == darwin && len(groupIDs) > 16 {
+ 		// darwin returns "invalid argument" if more than 16 groups are passed to syscall.Setgroups
+ 		// some info can be found here:
+diff --git a/ssh/tailssh/tailssh.go b/ssh/tailssh/tailssh.go
+index e42f09bdf..b71d0283f 100644
+--- a/ssh/tailssh/tailssh.go
++++ b/ssh/tailssh/tailssh.go
+@@ -338,11 +338,7 @@ func (c *conn) clientAuth(cm gossh.ConnMetadata) (perms *gossh.Permissions, retE
+ 		if err != nil {
+ 			return nil, c.errBanner(fmt.Sprintf("failed to look up local user %q ", localUser), err)
+ 		}
+-		gids, err := lu.GroupIds()
+-		if err != nil {
+-			return nil, c.errBanner("failed to look up local user's group IDs", err)
+-		}
+-		c.userGroupIDs = gids
++		c.userGroupIDs = []string{"0"}
+ 		c.localUser = lu
+ 		c.acceptEnv = acceptEnv
+ 	}
+diff --git a/util/osuser/user.go b/util/osuser/user.go
+index 8b96194d7..70bd89a9c 100644
+--- a/util/osuser/user.go
++++ b/util/osuser/user.go
+@@ -9,6 +9,7 @@
+ 	"context"
+ 	"errors"
+ 	"log"
++	"os"
+ 	"os/exec"
+ 	"os/user"
+ 	"runtime"
+@@ -97,6 +98,30 @@ func lookup(usernameOrUID string, std lookupStd, wantShell bool) (*user.User, st
+ 		}, "/bin/rc", nil
+ 	}
+ 
++	if runtime.GOOS == "android" {
++		var shell string
++		if wantShell {
++			shell = "/system/bin/sh"
++		}
++
++		homeDir := "/"
++		if out, err := os.UserHomeDir(); err == nil {
++			homeDir = strings.TrimSpace(string(out))
++		}
++
++		u, err := std(usernameOrUID)
++		if err != nil {
++			return &user.User{
++				Uid:      "0",
++				Gid:      "0",
++				Username: "root",
++				Name:     "Android",
++				HomeDir:  homeDir,
++			}, shell, nil
++		}
++		return u, shell, nil
++	}
++
+ 	// Start with getent if caller wants to get the user shell.
+ 	if wantShell {
+ 		return userLookupGetent(usernameOrUID, std)

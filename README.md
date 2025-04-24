@@ -2,17 +2,25 @@
 
 This repository contains a Magisk and KernelSU module for running Tailscale on rooted Android devices.
 
+## Prerequisites
+- Android 11 or higher
+- Magisk
+- KernelSU
+- WireGuard Compatible kernel
+
+Wireguard is enabled by default on 5.6+ kernels.To check if your kernel supports wireguard run
+
+```
+gunzip -c /proc/config.gz | grep CONFIG_WIREGUARD
+```
+
 ## Quick Start & Installation
 
 1. Download the latest zip file from the [Releases](https://github.com/mgksu/tailscaled/releases/latest) page.
 2. Install the downloaded zip file using Magisk & reboot your phone.
 3. Open the Terminal.
-4. Login with `su -c tailscale login`
-5. Disable accept-dns `su -c tailscale set --accept-dns=false`
-6. Run 'tailscale login' to login to your Tailscale account.
-7. Open the URL in a browser to authorize your device.
-8. Run 'tailscale ip' to retrieve your Tailscale IP.
-9. Alternatively, you can open the [Tailscale Admin Dashboard](https://login.tailscale.com/admin/machines) to manage your devices.
+4. Run `tailscale up --ssh --accept-dns=false` to initiate login.You can skip ssh if you don't need it.
+5. Run 'tailscale ip' to retrieve your Tailscale IP.
 
 After installation, the Tailscale daemon (`tailscaled`) will run automatically on boot.
 
@@ -20,10 +28,19 @@ After installation, the Tailscale daemon (`tailscaled`) will run automatically o
 
 - This module only support `arm64` architecture, you can download manually for other architecture.
 
+## Tailscale SSH 
+- For ssh home directory is created at `/data/ssh/root` with Bourne shell (sh) as default shell.
+- If you want to change to zsh or any other shell create a file `/data/ssh/root/.profile` with below content assuming you have installed zsh through termux.
+```
+export PATH="/data/data/com.termux/files/usr/bin:$PATH"
+export SHELL="zsh"
+exec zsh
+```
+
 ## Available command
 
-- `tailscale`: This command is execute tailscale operation.
-- `tailscaled`: This command is execute tailscaled daemon operation.
+- `tailscale`: This command  execute tailscale operation.
+- `tailscaled`: This command execute tailscaled daemon operation.
 - `tailscaled.service`: This command for manage tailscaled service, you can start,stop,restart daemon and view live logs the tailscaled operation.
 
 ### Cannot access other tailnet devices
@@ -45,8 +62,5 @@ You can explore to the issue tab, if there not exists, you can open issue, for h
 This module is confirmed to be supported for KernelSU
 
 ## Credits
-
-- [Tailscale Inc & AUTHORS](https://github.com/tailscale/tailscale). for the static binaries of tailscale & tailscaled
-- [John Wu & Authors](https://github.com/topjohnwu/Magisk). for The Magic Mask for Android
 
 - [ANASFANANI & AUTHORS](https://github.com/anasfanani/Magisk-Tailscaled). for the repo structure.
