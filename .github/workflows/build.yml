@@ -30,7 +30,7 @@ jobs:
 
     - name: Check Latest Version
       run: |
-        LATEST_VERSION=$(git describe --tags --abbrev=0)
+        LATEST_VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
         if [ "$LATEST_VERSION" == "${{ env.LATEST_TAILSCALE_VERSION_TAG }}" ]; then
           echo "No new version found. Exiting."
           exit 0
