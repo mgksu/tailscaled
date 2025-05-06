@@ -1,2 +1,2 @@
 #!/system/bin/sh
-/data/adb/tailscale/scripts/tailscaled.service" "$@"
+/data/adb/tailscale/scripts/tailscaled.service "$@"
