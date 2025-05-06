@@ -31,7 +31,7 @@ mkdir -p "$INSTALL_DIR" "$INSTALL_BIN_DIR" "$SERVICE_DIR"
 cp -r $MODPATH/tailscale/* "$INSTALL_DIR/"
 mv -f $MODPATH/files/tailscale.combined "$INSTALL_BIN_DIR/tailscale"
 cp -f "$INSTALL_BIN_DIR/tailscale" "$INSTALL_BIN_DIR/tailscaled"
-rm -f $MODPATH/files $MODPATH/tailscale
+rm -rf $MODPATH/files $MODPATH/tailscale
 
 ui_print "- Setting permissions"
 set_perm_recursive $INSTALL_DIR 0 0 0755 0755

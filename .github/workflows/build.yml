@@ -118,7 +118,7 @@ jobs:
     - name: Create Module Zip
       run: |
         mkdir -p dist
-        zip -9 -r ./dist/Magisk-Tailscaled-${{ env.version }}.zip . -x "*git*" "dist/*" "*.zip" "*.json" "*.md"
+        zip -9 -r ./dist/Magisk-Tailscaled-${{ env.version }}.zip . -x "*git*" "dist/*" "*.zip" "*.json" "*.md" "*.patch"
 
     - name: Set up Git
       run: |
