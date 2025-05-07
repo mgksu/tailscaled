@@ -70,6 +70,9 @@ jobs:
 
         patch -p1 < ../android.ssh.patch
 
+        sed -i 's|/etc/resolv.conf|/data/adb/tailscale/etc/resolv.conf|g' net/dns/resolvconfpath_default.go
+        sed -i 's|/etc/resolv.pre-tailscale-backup.conf|/data/adb/tailscale/etc/resolv.pre-tailscale-backup.conf|g' net/dns/resolvconfpath_default.go
+
         eval `CGO_ENABLED=0 GOOS=$(go env GOHOSTOS) GOARCH=$(go env GOHOSTARCH) go run ./cmd/mkversion`
         ldflags="-X tailscale.com/version.longStamp=${VERSION_LONG} -X tailscale.com/version.shortStamp=${VERSION_SHORT}"
 
