@@ -3,16 +3,7 @@
 This repository contains a Magisk and KernelSU module for running Tailscale on rooted Android devices.
 
 ## Prerequisites
-- Android 11 or higher
-- Magisk
-- KernelSU
-- WireGuard Compatible kernel
-
-Wireguard is enabled by default on 5.6+ kernels.To check if your kernel supports wireguard run
-
-```
-gunzip -c /proc/config.gz | grep CONFIG_WIREGUARD
-```
+- Magisk or KernelSU
 
 ## Quick Start & Installation
 
@@ -26,7 +17,7 @@ After installation, the Tailscale daemon (`tailscaled`) will run automatically o
 
 ## Limitation
 
-- This module only support `arm64` architecture, you can download manually for other architecture.
+- This module only support `arm64` architecture.
 
 ## Tailscale SSH 
 - For ssh home directory is created at `/data/ssh/root` with Bourne shell (sh) as default shell.
@@ -55,7 +46,7 @@ You can explore to the issue tab, if there not exists, you can open issue, for h
 
 1. Restart tailscaled with `tailscaled.service restart`
 2. Reproduce what are you doing which has problem.
-3. Get log at `/data/adb/tailscale/run/tailscaled.log`
+3. Get log at `tailscaled.service log`
 
 ## Notes
 
